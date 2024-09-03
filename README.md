@@ -19,7 +19,7 @@ A C# .Net 8 Console App, which uses pktmon.exe (Windows 10 and above) to capture
 - Copy the files where you want to and run clldp.exe
 
 ## UI
-Image coming soon of teh output...
+Image coming soon of the output...
 
 ## Future Enhancements
 - See if it's possible to capture CDP and parse it for CISCO switches.
