@@ -23,3 +23,7 @@ Image coming soon of the output...
 
 ## Future Enhancements
 - See if it's possible to capture CDP and parse it for CISCO switches.
+
+## Alternatives
+- https://github.com/chall32/LDWin
+- https://www.powershellgallery.com/packages/PSDiscoveryProtocol
