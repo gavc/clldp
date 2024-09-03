@@ -16,7 +16,7 @@ A C# .Net 8 Console App, which uses pktmon.exe (Windows 10 and above) to capture
 - Writes to C:\temp\<lldp.etl and lldp.txt>, will clean up the files once done.
 
 ## Installation
-- Copy the files where you want to and run clldp.exe
+- Copy the files where you want to and run clldp.exe, will also require .Net 8
 
 ## UI
 Image coming soon of the output...
