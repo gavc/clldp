@@ -19,21 +19,21 @@ A C# .Net 8 Console App, which uses pktmon.exe (Windows 10 and above) to capture
 - Copy the files where you want to and run clldp.exe, will also require .Net 8
 
 ## UI
-..\bin\Release\net8.0>clldp.exe
-Component ID: 868, Name: ASIX AX88772B USB2.0 to Fast Ethernet Adapter
-Enter the Component ID to capture on:
-868
-Capturing... 0 seconds remaining
-Parsed LLDP Data:
-Chassis ID: 68-FF-7B-B2-02-34
-Port ID: GigabitEthernet1/0/4
-Time to Live: TTL 120s
-System Name: T1500G-8T
-System Description: JetStream 8-Port Gigabit Smart Switch
-Management Address: 192.168.1.53
-Port Description: GigabitEthernet1/0/4 Interface
-VLANs:
-VLAN ID: 1 VLAN Name: System-VLAN
+    .\bin\Release\net8.0>clldp.exe
+    Component ID: 868, Name: ASIX AX88772B USB2.0 to Fast Ethernet Adapter
+    Enter the Component ID to capture on:
+    868
+    Capturing... 0 seconds remaining
+    Parsed LLDP Data:
+    Chassis ID: 68-FF-7B-B2-02-34
+    Port ID: GigabitEthernet1/0/4
+    Time to Live: TTL 120s
+    System Name: T1500G-8T
+    System Description: JetStream 8-Port Gigabit Smart Switch
+    Management Address: 192.168.1.53
+    Port Description: GigabitEthernet1/0/4 Interface
+    VLANs:
+    VLAN ID: 1 VLAN Name: System-VLAN
 
 ## Future Enhancements
 - See if it's possible to capture CDP and parse it for CISCO switches.
