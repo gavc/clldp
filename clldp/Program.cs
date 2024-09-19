@@ -14,9 +14,43 @@ namespace LLDPParser
         private static readonly string TxtFilePath = Path.Combine(TempDirectory, "lldp.txt");
         static void Main(string[] args)
         {
+            // Check for help argument
+            if (args.Contains("/help") || args.Contains("/?"))
+            {
+                ShowHelp();
+                return; // Exit after showing help
+            }
+
+            // Check for unsupported arguments
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] != "-debug" && args[i] != "-t" && args[i] != "/help" && args[i] != "/?")
+                {
+                    // If the argument is not "-t" and is not a valid argument, show error
+                    if (i == 0 || args[i - 1] != "-t") // This ensures that 45 is not flagged as invalid
+                    {
+                        Console.WriteLine("Unsupported argument(s) detected.");
+                        ShowHelp();
+                        return; // Exit the program if unsupported arguments are found
+                    }
+                }
+            }
+
+            bool debugMode = args.Contains("-debug");
+
+            // Set default capture duration
+            int captureDuration = 30; // Default duration is 30 seconds
+
+            // Check if a custom duration is provided as a command-line argument
+            int tIndex = Array.IndexOf(args, "-t");
+            if (tIndex != -1 && tIndex + 1 < args.Length && int.TryParse(args[tIndex + 1], out int parsedDuration))
+            {
+                captureDuration = ValidateCaptureDuration(parsedDuration);
+            }
+
             try
             {
-                CleanUp();
+                CleanUp(debugMode);
 
                 EnsureDirectoryExists(TempDirectory);
 
@@ -28,21 +62,22 @@ namespace LLDPParser
 
                     if (!string.IsNullOrEmpty(selectedCompID))
                     {
-                        // Set default capture duration
-                        int captureDuration = 30; // Default duration is 30 seconds
-
-                        // Check if a custom duration is provided as a command-line argument
-                        if (args.Length > 1 && args[0] == "-t" && int.TryParse(args[1], out int parsedDuration))
-                        {
-                            captureDuration = ValidateCaptureDuration(parsedDuration);
-                        }
-
                         // Capture LLDP data with the specified duration
                         CaptureLldpData(selectedCompID, captureDuration);
 
                         // Parse and display the captured LLDP data
                         var lldpData = ParseLldpData(TxtFilePath);
-                        DisplayLldpData(lldpData);
+                        //DisplayLldpData(lldpData);
+
+                        if (lldpData.Count == 0)
+                        {
+                            Console.WriteLine("No LLDP data captured. It's recommended to try again in case nothing was transmitted in the last 30 seconds.");
+                        }
+                        else
+                        {
+                            DisplayLldpData(lldpData);
+                        }
+
                     }
                 }
                 else
@@ -56,7 +91,7 @@ namespace LLDPParser
             }
             finally
             {
-                CleanUp();
+                CleanUp(debugMode);
             }
         }
         static int ValidateCaptureDuration(int duration)
@@ -134,9 +169,10 @@ namespace LLDPParser
                             string compID = parts[0].Trim();
                             string name = parts[2].Trim();
 
-                            // Filter out Bluetooth, Wireless, and Wi-Fi components
+                            // Filter components hopefully not needed
                             if (!name.ToLower().Contains("bluetooth") &&
                                 !name.ToLower().Contains("wireless") &&
+                                !name.ToLower().Contains("mobile broadband") &&
                                 !name.ToLower().Contains("wi-fi"))
                             {
                                 compIDs.Add(compID);
@@ -292,14 +328,25 @@ namespace LLDPParser
                 }
             }
         }
-        static void CleanUp()
+        static void CleanUp(bool debugMode)
         {
             ExecutePktmonCommand("stop");
             ExecutePktmonCommand("filter remove");
             ExecutePktmonCommand("reset");
 
-            if (File.Exists(EtlFilePath)) File.Delete(EtlFilePath);
-            if (File.Exists(TxtFilePath)) File.Delete(TxtFilePath);
+            if (!debugMode)
+            {
+                if (File.Exists(EtlFilePath)) File.Delete(EtlFilePath);
+                if (File.Exists(TxtFilePath)) File.Delete(TxtFilePath);
+            }
+        }
+        static void ShowHelp()
+        {
+            Console.WriteLine("Usage: clldp.exe [options]");
+            Console.WriteLine("Options:");
+            Console.WriteLine("  -debug            Run the program in debug mode (keeps temp .etl and .txt files).");
+            Console.WriteLine("  -t [duration]     Specify capture duration (must be between 30 and 60 seconds).");
+            Console.WriteLine("  /help, /?         Display this help message.");
         }
     }
 }
