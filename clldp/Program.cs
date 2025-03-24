@@ -12,6 +12,7 @@ namespace LLDPParser
         private static readonly string TempDirectory = Path.Combine("c:", "temp");
         private static readonly string EtlFilePath = Path.Combine(TempDirectory, "lldp.etl");
         private static readonly string TxtFilePath = Path.Combine(TempDirectory, "lldp.txt");
+
         static void Main(string[] args)
         {
             // Check for help argument
@@ -24,24 +25,31 @@ namespace LLDPParser
             // Check for unsupported arguments
             for (int i = 0; i < args.Length; i++)
             {
-                if (args[i] != "-debug" && args[i] != "-t" && args[i] != "/help" && args[i] != "/?")
+                if (args[i] != "-debug" && args[i] != "-t" && args[i] != "-p" && args[i] != "/help" && args[i] != "/?")
                 {
-                    // If the argument is not "-t" and is not a valid argument, show error
-                    if (i == 0 || args[i - 1] != "-t") // This ensures that 45 is not flagged as invalid
+                    // If the argument is not "-t" or "-p" and is not a valid argument, show error
+                    if ((i == 0 || args[i - 1] != "-t") && (i == 0 || args[i - 1] != "-p"))
                     {
                         Console.WriteLine("Unsupported argument(s) detected.");
                         ShowHelp();
-                        return; // Exit the program if unsupported arguments are found
+                        return;
                     }
                 }
             }
 
             bool debugMode = args.Contains("-debug");
 
-            // Set default capture duration
-            int captureDuration = 30; // Default duration is 30 seconds
+            // Parse optional -p argument
+            string portArg = null;
+            int pIndex = Array.IndexOf(args, "-p");
+            if (pIndex != -1 && pIndex + 1 < args.Length)
+            {
+                portArg = args[pIndex + 1];
+            }
 
-            // Check if a custom duration is provided as a command-line argument
+            // Set default capture duration
+            int captureDuration = 30;
+            // Check if a custom duration is provided
             int tIndex = Array.IndexOf(args, "-t");
             if (tIndex != -1 && tIndex + 1 < args.Length && int.TryParse(args[tIndex + 1], out int parsedDuration))
             {
@@ -51,7 +59,6 @@ namespace LLDPParser
             try
             {
                 CleanUp(debugMode);
-
                 EnsureDirectoryExists(TempDirectory);
 
                 var compIDs = GetComponentIDs();
@@ -62,12 +69,8 @@ namespace LLDPParser
 
                     if (!string.IsNullOrEmpty(selectedCompID))
                     {
-                        // Capture LLDP data with the specified duration
                         CaptureLldpData(selectedCompID, captureDuration);
-
-                        // Parse and display the captured LLDP data
                         var lldpData = ParseLldpData(TxtFilePath);
-                        //DisplayLldpData(lldpData);
 
                         if (lldpData.Count == 0)
                         {
@@ -76,8 +79,18 @@ namespace LLDPParser
                         else
                         {
                             DisplayLldpData(lldpData);
-                        }
 
+                            // If -p was provided, also write out results to a new file
+                            if (!string.IsNullOrEmpty(portArg))
+                            {
+                                string shortPortName = ConvertToDos83Format(portArg);
+                                string outPath = Path.Combine(
+                                    TempDirectory,
+                                    $"{DateTime.Now:yyyyMMdd}_{shortPortName}_results.txt"
+                                );
+                                WriteLldpDataToFile(lldpData, outPath);
+                            }
+                        }
                     }
                 }
                 else
@@ -94,6 +107,7 @@ namespace LLDPParser
                 CleanUp(debugMode);
             }
         }
+
         static int ValidateCaptureDuration(int duration)
         {
             if (duration < 30 || duration > 60)
@@ -110,31 +124,24 @@ namespace LLDPParser
             if (!Directory.Exists(path))
             {
                 Directory.CreateDirectory(path);
-                //Console.WriteLine($"Directory created: {path}");
             }
         }
 
         static void CaptureLldpData(string selectedCompID, int durationInSeconds)
         {
             ExecutePktmonCommand("filter add --ethertype 0x88cc");
-
             ExecutePktmonCommand($"start --capture --comp {selectedCompID} --pkt-size 0 -f {EtlFilePath}");
 
-            // Non-blocking countdown with time left display
             DateTime endTime = DateTime.Now.AddSeconds(durationInSeconds);
             while (DateTime.Now < endTime)
             {
                 int remainingSeconds = (int)(endTime - DateTime.Now).TotalSeconds;
                 Console.Write($"\rCapturing... {remainingSeconds} seconds remaining ");
-                Thread.Sleep(1000); // Sleep for 1 second to update the countdown
+                Thread.Sleep(1000);
             }
 
-            Console.WriteLine(); // Move to the next line after the countdown is complete
-
-            // Stop packet capture
+            Console.WriteLine();
             ExecutePktmonCommand("stop");
-
-            // Convert ETL to text
             ExecutePktmonCommand($"format {EtlFilePath} -o {TxtFilePath} -v");
         }
 
@@ -148,7 +155,7 @@ namespace LLDPParser
                 string[] lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
                 bool dataSectionStarted = false;
 
-                foreach (string line in lines)
+                foreach (var line in lines)
                 {
                     if (!dataSectionStarted)
                     {
@@ -169,7 +176,6 @@ namespace LLDPParser
                             string compID = parts[0].Trim();
                             string name = parts[2].Trim();
 
-                            // Filter components hopefully not needed
                             if (!name.ToLower().Contains("bluetooth") &&
                                 !name.ToLower().Contains("wireless") &&
                                 !name.ToLower().Contains("mobile broadband") &&
@@ -205,13 +211,13 @@ namespace LLDPParser
         {
             try
             {
-                ProcessStartInfo startInfo = new ProcessStartInfo("pktmon", arguments)
+                var startInfo = new ProcessStartInfo("pktmon", arguments)
                 {
                     RedirectStandardOutput = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
-                using (Process process = Process.Start(startInfo))
+                using (var process = Process.Start(startInfo))
                 {
                     string output = process.StandardOutput.ReadToEnd();
                     process.WaitForExit();
@@ -240,32 +246,26 @@ namespace LLDPParser
                     {
                         lldpData["Chassis ID"] = reader.ReadLine()?.Split(": ")[1].Trim();
                     }
-                    // Extract Port ID
                     else if (line.Contains("Port ID TLV"))
                     {
                         lldpData["Port ID"] = reader.ReadLine()?.Split(": ")[1].Trim();
                     }
-                    // Extract Time to Live
                     else if (line.Contains("Time to Live TLV"))
                     {
                         lldpData["Time to Live"] = line.Split(": ")[1].Trim();
                     }
-                    // Extract Port Description
                     else if (line.Contains("Port Description TLV"))
                     {
                         lldpData["Port Description"] = line.Split(": ")[1].Trim();
                     }
-                    // Extract System Name
                     else if (line.Contains("System Name TLV"))
                     {
                         lldpData["System Name"] = line.Split(": ")[1].Trim();
                     }
-                    // Extract System Description
                     else if (line.Contains("System Description TLV"))
                     {
                         lldpData["System Description"] = reader.ReadLine()?.Trim();
                     }
-                    // Extract System Capabilities
                     else if (line.Contains("System Capabilities TLV"))
                     {
                         var capabilitiesLine = reader.ReadLine()?.Split(": ");
@@ -279,7 +279,6 @@ namespace LLDPParser
                             lldpData["Enabled Capabilities"] = enabledCapabilitiesLine[1].Trim();
                         }
                     }
-                    // Extract Management Address
                     else if (line.Contains("Management Address TLV"))
                     {
                         var managementAddressLine = reader.ReadLine()?.Split(": ");
@@ -288,7 +287,6 @@ namespace LLDPParser
                             lldpData["Management Address"] = managementAddressLine[1].Trim();
                         }
                     }
-                    // Extract VLAN Information
                     else if (line.Contains("VLAN name Subtype"))
                     {
                         string vlanId = reader.ReadLine()?.Split(": ")[1].Trim();
@@ -298,7 +296,6 @@ namespace LLDPParser
                 }
             }
 
-            // Add VLAN data to the main dictionary
             if (vlanData.Count > 0)
             {
                 lldpData["VLANs"] = string.Join("\n", vlanData);
@@ -310,14 +307,10 @@ namespace LLDPParser
         static void DisplayLldpData(Dictionary<string, string> lldpData)
         {
             Console.WriteLine("Parsed LLDP Data:");
-
-            // Display each key-value pair
             foreach (var item in lldpData)
             {
-                // Add a newline before and after VLANs section
                 if (item.Key == "VLANs")
                 {
-                    //Console.WriteLine();
                     Console.WriteLine($"{item.Key}:");
                     Console.WriteLine($"{item.Value}");
                     Console.WriteLine();
@@ -328,6 +321,58 @@ namespace LLDPParser
                 }
             }
         }
+
+        // New helper to write LLDP data to a file.
+        static void WriteLldpDataToFile(Dictionary<string, string> lldpData, string path)
+        {
+            using (var writer = new StreamWriter(path, false))
+            {
+                writer.WriteLine("Parsed LLDP Data:");
+                foreach (var item in lldpData)
+                {
+                    if (item.Key == "VLANs")
+                    {
+                        writer.WriteLine($"{item.Key}:");
+                        writer.WriteLine($"{item.Value}");
+                        writer.WriteLine();
+                    }
+                    else
+                    {
+                        writer.WriteLine($"{item.Key}: {item.Value}");
+                    }
+                }
+            }
+            Console.WriteLine($"Results also written to: {path}");
+        }
+
+        // Simple function to convert the -p argument to DOS 8.3 style (basic approximation).
+        static string ConvertToDos83Format(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return "DEFAULT";
+
+            // Remove invalid chars, replace spaces with underscores, uppercase
+            var validChars = new List<char>();
+            foreach (char c in input)
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    validChars.Add(char.ToUpperInvariant(c));
+                }
+                else if (char.IsWhiteSpace(c))
+                {
+                    validChars.Add('_');
+                }
+            }
+
+            string output = new string(validChars.ToArray());
+            if (output.Length <= 8)
+            {
+                return output;
+            }
+            // Basic approximation for a trimmed 8.3 short name
+            return $"{output.Substring(0, 6)}~1";
+        }
+
         static void CleanUp(bool debugMode)
         {
             ExecutePktmonCommand("stop");
@@ -340,12 +385,14 @@ namespace LLDPParser
                 if (File.Exists(TxtFilePath)) File.Delete(TxtFilePath);
             }
         }
+
         static void ShowHelp()
         {
             Console.WriteLine("Usage: clldp.exe [options]");
             Console.WriteLine("Options:");
             Console.WriteLine("  -debug            Run the program in debug mode (keeps temp .etl and .txt files).");
             Console.WriteLine("  -t [duration]     Specify capture duration (must be between 30 and 60 seconds).");
+            Console.WriteLine("  -p [text]         Write results to C:\\temp\\yyyyMMdd_<DOS8.3converted>_results.txt in addition to console.");
             Console.WriteLine("  /help, /?         Display this help message.");
         }
     }
