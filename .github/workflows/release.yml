@@ -1,0 +1,130 @@
+name: Build & Release
+
+permissions:
+  contents: write   # needed to push tags and create releases
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'    # runs when you push a tag like v1.0.2
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag (e.g. v1.0.2)'
+        required: true
+        type: string
+
+jobs:
+  build_and_release:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Create tag (manual workflow run)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag ${{ github.event.inputs.version }}
+          git push origin ${{ github.event.inputs.version }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build clldp/clldp.csproj -c Release --no-restore
+
+      - name: Publish self-contained Windows x64 single-file
+        run: |
+          dotnet publish clldp/clldp.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o publish/win-x64
+
+      - name: Publish framework-dependent Windows x64 single-file
+        run: |
+          dotnet publish clldp/clldp.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -p:PublishSingleFile=true `
+            -o publish/win-x64-framework-dependent
+
+      - name: Create release archive (self-contained)
+        run: |
+          Compress-Archive -Path publish/win-x64/* -DestinationPath clldp-win-x64-self-contained.zip
+
+      - name: Create release archive (framework-dependent)
+        run: |
+          Compress-Archive -Path publish/win-x64-framework-dependent/* -DestinationPath clldp-win-x64-framework-dependent.zip
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          $version = "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}"
+          $notes = @"
+          ## CLLDP $version
+          
+          ### What's Included
+          
+          - **clldp-win-x64-self-contained.zip** - Self-contained executable (no .NET runtime required, ~70MB)
+          - **clldp-win-x64-framework-dependent.zip** - Framework-dependent executable (requires .NET 8 runtime, ~200KB)
+          
+          ### Requirements
+          
+          - Windows 10 1809+ or Windows 11 (pktmon built-in)
+          - Administrator privileges
+          - .NET 8 Runtime (framework-dependent version only)
+          
+          ### Usage
+          
+          1. Extract the zip file
+          2. Right-click ``clldp.exe`` and select "Run as administrator"
+          3. Follow the prompts to capture LLDP data
+          
+          Run ``clldp.exe /?`` for help and command-line options.
+          
+          ### Changes in this Release
+          
+          See commit history for detailed changes.
+          "@
+          
+          # Write to output file for multi-line content
+          $notes | Out-File -FilePath release_notes.txt -Encoding utf8
+          echo "notes_file=release_notes.txt" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          name: CLLDP ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          body_path: release_notes.txt
+          files: |
+            clldp-win-x64-self-contained.zip
+            clldp-win-x64-framework-dependent.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clldp-windows-builds
+          path: |
+            clldp-win-x64-self-contained.zip
+            clldp-win-x64-framework-dependent.zip
+          retention-days: 90

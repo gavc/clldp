@@ -78,25 +78,46 @@ namespace LLDPParser
 
                     if (!string.IsNullOrEmpty(selectedCompID))
                     {
-                        CaptureLldpData(selectedCompID, captureDuration);
-                        var lldpData = ParseLldpData(TxtFilePath);
-
-                        if (lldpData.Count == 0)
+                        bool captureSuccessful = false;
+                        
+                        while (!captureSuccessful)
                         {
-                            Console.WriteLine("No LLDP data captured. It's recommended to try again in case nothing was transmitted in the last 30 seconds.");
-                        }
-                        else
-                        {
-                            DisplayLldpData(lldpData);
+                            CaptureLldpData(selectedCompID, captureDuration);
+                            var lldpData = ParseLldpData(TxtFilePath);
 
-                            // If -p was provided, also write out results to a new file
-                            if (!string.IsNullOrEmpty(portArg))
+                            if (lldpData.Count == 0)
                             {
-                                string outPath = Path.Combine(
-                                    TempDirectory,
-                                    $"CLLDP_{DateTime.Now:yyyyMMddHHmmss}_{portArg}.txt"
-                                );
-                                WriteLldpDataToFile(lldpData, outPath);
+                                Console.WriteLine("\nNo LLDP data captured. This may occur if no LLDP packets were transmitted during the capture window.");
+                                Console.Write("Would you like to retry the capture? (Y/N): ");
+                                
+                                string response = Console.ReadLine()?.Trim().ToUpper();
+                                
+                                if (response == "Y" || response == "YES")
+                                {
+                                    Console.WriteLine("Retrying capture with the same configuration...\n");
+                                    CleanUp(debugMode);
+                                    continue;
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Capture cancelled.");
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                captureSuccessful = true;
+                                DisplayLldpData(lldpData);
+
+                                // If -p was provided, also write out results to a new file
+                                if (!string.IsNullOrEmpty(portArg))
+                                {
+                                    string outPath = Path.Combine(
+                                        TempDirectory,
+                                        $"CLLDP_{DateTime.Now:yyyyMMddHHmmss}_{portArg}.txt"
+                                    );
+                                    WriteLldpDataToFile(lldpData, outPath);
+                                }
                             }
                         }
                     }
@@ -322,63 +343,211 @@ namespace LLDPParser
         {
             var lldpData = new Dictionary<string, string>();
             var vlanData = new List<string>();
+            bool inLldpPacket = false;
+
+            if (!File.Exists(filePath))
+            {
+                Console.WriteLine($"Warning: File not found: {filePath}");
+                return lldpData;
+            }
 
             using (var reader = new StreamReader(filePath))
             {
                 string line;
                 while ((line = reader.ReadLine()) != null)
                 {
+                    // Detect LLDP packet sections
+                    if (line.Contains("ethertype LLDP (0x88cc)"))
+                    {
+                        inLldpPacket = true;
+                        continue;
+                    }
+
+                    // Skip non-LLDP packet data
+                    if (!inLldpPacket)
+                        continue;
+
+                    if (line.Contains("End TLV (0)"))
+                        inLldpPacket = false;  // End of LLDP packet
+
                     // Extract Chassis ID
                     if (line.Contains("Chassis ID TLV"))
                     {
-                        lldpData["Chassis ID"] = reader.ReadLine()?.Split(": ")[1].Trim();
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null && nextLine.Contains(": "))
+                        {
+                            string[] parts = nextLine.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Chassis ID"] = parts[1].Trim();
+                        }
                     }
                     else if (line.Contains("Port ID TLV"))
                     {
-                        lldpData["Port ID"] = reader.ReadLine()?.Split(": ")[1].Trim();
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null && nextLine.Contains(": "))
+                        {
+                            string[] parts = nextLine.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Port ID"] = parts[1].Trim();
+                        }
                     }
                     else if (line.Contains("Time to Live TLV"))
                     {
-                        lldpData["Time to Live"] = line.Split(": ")[1].Trim();
+                        if (line.Contains("TTL"))
+                        {
+                            int ttlIndex = line.IndexOf("TTL");
+                            if (ttlIndex >= 0)
+                                lldpData["Time to Live"] = line.Substring(ttlIndex).Trim();
+                        }
                     }
                     else if (line.Contains("Port Description TLV"))
                     {
-                        lldpData["Port Description"] = line.Split(": ")[1].Trim();
+                        if (line.Contains(": "))
+                        {
+                            string[] parts = line.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Port Description"] = parts[1].Trim();
+                        }
+                        else
+                        {
+                            var nextLine = reader.ReadLine();
+                            if (nextLine != null)
+                                lldpData["Port Description"] = nextLine.Trim();
+                        }
                     }
                     else if (line.Contains("System Name TLV"))
                     {
-                        lldpData["System Name"] = line.Split(": ")[1].Trim();
+                        if (line.Contains(": "))
+                        {
+                            string[] parts = line.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["System Name"] = parts[1].Trim();
+                        }
+                        else
+                        {
+                            var nextLine = reader.ReadLine();
+                            if (nextLine != null)
+                                lldpData["System Name"] = nextLine.Trim();
+                        }
                     }
                     else if (line.Contains("System Description TLV"))
                     {
-                        lldpData["System Description"] = reader.ReadLine()?.Trim();
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null)
+                            lldpData["System Description"] = nextLine.Trim();
                     }
                     else if (line.Contains("System Capabilities TLV"))
                     {
-                        var capabilitiesLine = reader.ReadLine()?.Split(": ");
-                        if (capabilitiesLine != null && capabilitiesLine.Length > 1)
+                        var capabilitiesLine = reader.ReadLine();
+                        if (capabilitiesLine != null && capabilitiesLine.Contains(": "))
                         {
-                            lldpData["System Capabilities"] = capabilitiesLine[1].Trim();
+                            string[] parts = capabilitiesLine.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["System Capabilities"] = parts[1].Trim();
                         }
-                        var enabledCapabilitiesLine = reader.ReadLine()?.Split(": ");
-                        if (enabledCapabilitiesLine != null && enabledCapabilitiesLine.Length > 1)
+
+                        var enabledCapabilitiesLine = reader.ReadLine();
+                        if (enabledCapabilitiesLine != null && enabledCapabilitiesLine.Contains(": "))
                         {
-                            lldpData["Enabled Capabilities"] = enabledCapabilitiesLine[1].Trim();
+                            string[] parts = enabledCapabilitiesLine.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Enabled Capabilities"] = parts[1].Trim();
                         }
                     }
                     else if (line.Contains("Management Address TLV"))
                     {
-                        var managementAddressLine = reader.ReadLine()?.Split(": ");
-                        if (managementAddressLine != null && managementAddressLine.Length > 1)
+                        var managementAddressLine = reader.ReadLine();
+                        if (managementAddressLine != null && managementAddressLine.Contains(": "))
                         {
-                            lldpData["Management Address"] = managementAddressLine[1].Trim();
+                            string[] parts = managementAddressLine.Split(new[] { ": " }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Management Address"] = parts[1].Trim();
                         }
                     }
+                    // Port VLAN ID
+                    else if (line.Contains("Port VLAN Id Subtype"))
+                    {
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null && nextLine.Contains("port vlan id (PVID):"))
+                        {
+                            string[] parts = nextLine.Split(new[] { ":" }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Port VLAN ID"] = parts[1].Trim();
+                        }
+                    }
+                    // MAC/PHY Configuration
+                    else if (line.Contains("MAC/PHY configuration/status Subtype"))
+                    {
+                        var autonegLine = reader.ReadLine();
+                        var pmdLine = reader.ReadLine();
+                        var mauLine = reader.ReadLine();
+                        
+                        if (autonegLine != null && pmdLine != null)
+                        {
+                            string config = $"{autonegLine.Trim()}, {pmdLine.Trim()}";
+                            if (mauLine != null)
+                                config += $", {mauLine.Trim()}";
+                            
+                            lldpData["MAC/PHY Configuration"] = config;
+                        }
+                    }
+                    // Maximum Frame Size
+                    else if (line.Contains("Max frame size Subtype"))
+                    {
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null && nextLine.Contains("MTU size"))
+                        {
+                            string[] parts = nextLine.Split(new[] { "size" }, 2, StringSplitOptions.None);
+                            if (parts.Length > 1)
+                                lldpData["Maximum Frame Size"] = parts[1].Trim();
+                        }
+                    }
+                    // Power via MDI
+                    else if (line.Contains("Power via MDI Subtype"))
+                    {
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null)
+                            lldpData["Power via MDI"] = nextLine.Trim();
+                    }
+                    // Link Aggregation
+                    else if (line.Contains("Link aggregation Subtype"))
+                    {
+                        var nextLine = reader.ReadLine();
+                        if (nextLine != null)
+                            lldpData["Link Aggregation"] = nextLine.Trim();
+                    }
+                    // Network Policy (Voice VLAN)
+                    else if (line.Contains("Network policy Subtype"))
+                    {
+                        var appLine = reader.ReadLine();
+                        var vlanLine = reader.ReadLine();
+                        
+                        if (appLine != null && appLine.Contains("voice"))
+                        {
+                            string policy = appLine.Trim();
+                            if (vlanLine != null)
+                                policy += ", " + vlanLine.Trim();
+                            
+                            lldpData["Voice Policy"] = policy;
+                        }
+                    }
+                    // VLAN Names
                     else if (line.Contains("VLAN name Subtype"))
                     {
-                        string vlanId = reader.ReadLine()?.Split(": ")[1].Trim();
-                        string vlanName = reader.ReadLine()?.Split(": ")[1].Trim();
-                        vlanData.Add($"VLAN ID: {vlanId} VLAN Name: {vlanName}");
+                        var vlanIdLine = reader.ReadLine();
+                        var vlanNameLine = reader.ReadLine();
+                        
+                        if (vlanIdLine != null && vlanNameLine != null)
+                        {
+                            string vlanId = vlanIdLine.Contains(":") ? 
+                                vlanIdLine.Split(new[] { ':' }, 2)[1].Trim() : "";
+                            
+                            string vlanName = vlanNameLine.Contains(":") ? 
+                                vlanNameLine.Split(new[] { ':' }, 2)[1].Trim() : "";
+                            
+                            if (!string.IsNullOrEmpty(vlanId) && !string.IsNullOrEmpty(vlanName))
+                                vlanData.Add($"VLAN ID: {vlanId}, VLAN Name: {vlanName}");
+                        }
                     }
                 }
             }
@@ -408,6 +577,12 @@ namespace LLDPParser
                 "System Description", 
                 "System Capabilities", 
                 "Enabled Capabilities",
+                "Port VLAN ID",
+                "Maximum Frame Size",
+                "MAC/PHY Configuration",
+                "Power via MDI",
+                "Link Aggregation",
+                "Voice Policy",
                 "Time to Live",
                 "VLANs"
             };
@@ -460,6 +635,12 @@ namespace LLDPParser
                         "System Description", 
                         "System Capabilities", 
                         "Enabled Capabilities",
+                        "Port VLAN ID",
+                        "Maximum Frame Size",
+                        "MAC/PHY Configuration",
+                        "Power via MDI",
+                        "Link Aggregation",
+                        "Voice Policy",
                         "Time to Live",
                         "VLANs"
                     };
