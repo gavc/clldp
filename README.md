@@ -1,6 +1,6 @@
 # CLLDP
 
-A C# .NET 8 console application that captures and parses LLDP (Link Layer Discovery Protocol) data using Windows built-in `pktmon.exe`. Perfect for network troubleshooting and documentation.
+A Windows-only C# .NET 8 console application that captures and parses LLDP (Link Layer Discovery Protocol) data using built-in `pktmon.exe`. Perfect for network troubleshooting and documentation.
 
 ## Features
 
@@ -14,8 +14,8 @@ A C# .NET 8 console application that captures and parses LLDP (Link Layer Discov
 - Automatic detection of LLDP packet boundaries for accurate parsing
 
 ### User Experience
-- **Smart adapter selection** - Auto-suggests the first available Ethernet adapter with visual highlighting
-- **Automatic retry** - Prompts to retry capture if no LLDP data is received (saves time during troubleshooting)
+- **Smart adapter selection** - Highlights a suggested Ethernet adapter and uses clearer prompts when only one adapter is available
+- **Automatic retry** - Prompts to retry capture if no LLDP data is received, and retries once automatically when only a partial LLDP frame is captured
 - **Professional output** - Clean, formatted display with logical field ordering
 - **Color highlighting** - Green "SUGGESTED" text for recommended adapter
 
@@ -28,6 +28,7 @@ A C# .NET 8 console application that captures and parses LLDP (Link Layer Discov
 ### Safety & Reliability
 - Administrator privilege check on startup
 - Filters out non-Ethernet adapters (Wi-Fi, Bluetooth, wireless)
+- Bounded `pktmon` execution to avoid hangs during verbose capture formatting
 - Enhanced error handling and informative messages
 - Automatic cleanup of temporary files
 
@@ -36,6 +37,8 @@ A C# .NET 8 console application that captures and parses LLDP (Link Layer Discov
 - Administrator privileges (required for `pktmon.exe`)
 - .NET 8 Runtime (framework-dependent build) or use self-contained build
 - `pktmon.exe` (built into Windows 10 1809+)
+
+This tool is Windows-only because it depends on `pktmon.exe`.
 
 ## Installation
 
@@ -53,7 +56,7 @@ Download `clldp-win-x64-framework-dependent.zip` from [Releases](https://github.
 
 ## Usage Examples
 
-### Basic capture (30 seconds, auto-suggested adapter)
+### Basic capture (30 seconds, guided adapter selection)
 ```powershell
 # Right-click clldp.exe → "Run as administrator"
 # Or from PowerShell:
@@ -91,6 +94,9 @@ Available Network Adapters:
 
 Press Enter to use the suggested adapter, or type a Component ID to use a different one:
 
+# If only one LAN adapter is found, the prompt becomes:
+Press Enter to use this adapter, or type its Component ID to confirm:
+
 Capturing... 30 seconds remaining
 
 ========================================
@@ -120,6 +126,14 @@ VLANs:
 ========================================
 ```
 
+### Partial Capture Example
+
+```
+LLDP packets were captured, but no complete LLDP frame was found during the capture window.
+Detected 1 LLDP frame(s), including 1 partial frame(s) that did not contain enough data to parse.
+A partial LLDP frame was found, so clldp will retry the capture once automatically.
+```
+
 ## Troubleshooting
 
 ### No LLDP data captured
@@ -127,6 +141,10 @@ VLANs:
 - LLDP packets are typically transmitted every 30 seconds by switches
 - Ensure the device is connected to a switch/router that supports LLDP
 - Some devices may have LLDP disabled by default
+
+### Partial LLDP frame captured
+- The app retries once automatically if it detects a partial LLDP frame that does not contain enough data to parse
+- If the second capture is still incomplete, the normal retry prompt is shown
 
 ### Access Denied / Permission errors
 - Ensure you're running as Administrator (required for `pktmon.exe`)
